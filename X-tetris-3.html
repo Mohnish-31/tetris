@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Tetris Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #282c34;
+            color: white;
+        }
+        #header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .level-button {
+            width: 50px;
+            height: 50px;
+            margin: 5px;
+            display: inline-block;
+            text-align: center;
+            line-height: 50px;
+            background-color: #61dafb;
+            color: #282c34;
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        #game-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+        }
+        #tetris-canvas {
+            border: 1px solid #61dafb;
+            background-color: #20232a;
+        }
+        .control-button {
+            margin: 5px;
+            padding: 10px;
+            background-color: #61dafb;
+            color: #282c34;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        @media (max-width: 600px) {
+            .control-button {
+                width: 60px;
+                height: 60px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>Tetris Game</h1>
+        <p id="points">Points: 0</p>
+        <div id="level-buttons">
+            <!-- Level buttons will be dynamically generated here -->
+        </div>
+    </div>
+    <div id="game-container">
+        <canvas id="tetris-canvas" width="240" height="400"></canvas>
+        <div id="controls">
+            <button class="control-button" id="left">Left</button>
+            <button class="control-button" id="rotate">Rotate</button>
+            <button class="control-button" id="right">Right</button>
+            <button class="control-button" id="down">Down</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Initialize points
+            let points = parseInt(localStorage.getItem('points')) || 0;
+            document.getElementById('points').innerText = `Points: ${points}`;
+
+            // Sound effects
+            const rotateSound = new Audio('rotate.mp3');
+            const moveSound = new Audio('move.mp3');
+            const clearSound = new Audio('clear.mp3');
+            const gameOverSound = new Audio('gameover.mp3');
+
+            // Generate level buttons
+            const levelButtonsContainer = document.getElementById('level-buttons');
+            for (let i = 1; i <= 5; i++) {
+                const button = document.createElement('div');
+                button.classList.add('level-button');
+                button.innerText = i;
+                button.addEventListener('click', () => loadLevel(i));
+                levelButtonsContainer.appendChild(button);
+            }
+
+            // Load level function
+            function loadLevel(level) {
+                document.getElementById('header').style.display = 'none';
+                const gameContainer = document.getElementById('game-container');
+                gameContainer.style.display = 'flex';
+                gameContainer.innerHTML = `
+                    <canvas id="tetris-canvas" width="240" height="400"></canvas>
+                    <div id="controls">
+                    &emsp; &emsp; &emsp; 
+                        <button class="control-button" id="rotate">Rotate</button><br>
+                        <button class="control-button" id="left">Left</button>
+                        &emsp; &emsp; 
+                        <button class="control-button" id="right">Right</button><br />
+                        &emsp; &emsp; &emsp;
+                        <button class="control-button" id="down">Down</button>
+                    </div>
+                `;
+
+                // Initialize Tetris game
+                initTetris();
+            }
+
+            // Tetris game logic
+            function initTetris() {
+                const canvas = document.getElementById('tetris-canvas');
+                const context = canvas.getContext('2d');
+                const grid = 20;
+                const tetrominoes = [
+                    [[1,1,1,1]], // I
+                    [[1,1],[1,1]], // O
+                    [[0,1,0],[1,1,1]], // T
+                    [[1,1,0],[0,1,1]], // S
+                    [[0,1,1],[1,1,0]] // Z
+                ];
+                const colors = ['cyan', 'yellow', 'purple', 'green', 'red'];
+                let tetromino;
+                let rAF;
+                let board = [];
+                let score = 0;
+                const rows = canvas.height / grid;
+                const cols = canvas.width / grid;
+
+                // Speed control variables
+                let dropInterval = 500; // Time in milliseconds between each drop (1 second)
+                let lastTime = 0;
+
+                for (let row = 0; row < rows; row++) {
+                    board[row] = [];
+                    for (let col = 0; col < cols; col++) {
+                        board[row][col] = 0;
+                    }
+                }
+
+                function resetTetromino() {
+                    const rand = Math.floor(Math.random() * tetrominoes.length);
+                    tetromino = {
+                        shape: tetrominoes[rand],
+                        color: colors[rand],
+                        x: Math.floor(cols / 2) - 1,
+                        y: 0
+                    };
+                }
+
+                function drawBoard() {
+                    context.clearRect(0, 0, canvas.width, canvas.height);
+                    for (let row = 0; row < rows; row++) {
+                        for (let col = 0; col < cols; col++) {
+                            if (board[row][col]) {
+                                context.fillStyle = board[row][col];
+                                context.fillRect(col * grid, row * grid, grid - 1, grid - 1);
+                            }
+                        }
+                    }
+                }
+
+                function drawTetromino() {
+                    context.fillStyle = tetromino.color;
+                    tetromino.shape.forEach((row, y) => {
+                        row.forEach((cell, x) => {
+                            if (cell) {
+                                context.fillRect((tetromino.x + x) * grid, (tetromino.y + y) * grid, grid - 1, grid - 1);
+                            }
+                        });
+                    });
+                }
+
+                function rotate(matrix) {
+                    const N = matrix.length;
+                    const result = matrix.map(row => row.slice());
+                    for (let y = 0; y < N; ++y) {
+                        for (let x = 0; x < N; ++x) {
+                            result[x][N - 1 - y] = matrix[y][x];
+                        }
+                    }
+                    return result;
+                }
+
+                function collide(board, tetromino) {
+                    for (let y = 0; y < tetromino.shape.length; y++) {
+                        for (let x = 0; x < tetromino.shape[y].length; x++) {
+                            if (tetromino.shape[y][x] && 
+                                (board[tetromino.y + y] && board[tetromino.y + y][tetromino.x + x]) !== 0) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+
+                function merge(board, tetromino) {
+                    tetromino.shape.forEach((row, y) => {
+                        row.forEach((cell, x) => {
+                            if (cell) {
+                                board[tetromino.y + y][tetromino.x + x] = tetromino.color;
+                            }
+                        });
+                    });
+                }
+
+                function clearLines() {
+                    outer: for (let row = rows - 1; row >= 0; row--) {
+                        for (let col = 0; col < cols; col++) {
+                            if (!board[row][col]) {
+                                continue outer;
+                            }
+                        }
+                        board.splice(row, 1);
+                        board.unshift(new Array(cols).fill(0));
+                        score += 10;
+                        clearSound.play();
+                    }
+                }
+
+                function update(time = 0) {
+                    const deltaTime = time - lastTime;
+                    if (deltaTime > dropInterval) {
+                        tetromino.y += 1;
+                        if (collide(board, tetromino)) {
+                            tetromino.y -= 1;
+                            merge(board, tetromino);
+                            resetTetromino();
+                            clearLines();
+                            updateScore();
+                            if (collide(board, tetromino)) {
+                                cancelAnimationFrame(rAF);
+                                gameOverSound.play();
+                                alert('Game Over');
+                                localStorage.setItem('points', score);
+                                document.getElementById('points').innerText = `Points: ${score}`;
+                                document.getElementById('header').style.display = 'block';
+                                document.getElementById('game-container').style.display = 'none';
+                                return;
+                            }
+                        }
+                        lastTime = time;
+                    }
+                    drawBoard();
+                    drawTetromino();
+                    rAF = requestAnimationFrame(update);
+                }
+
+                function updateScore() {
+                    document.getElementById('points').innerText = `Points: ${score}`;
+                }
+
+                function handleControls() {
+                    document.getElementById('left').addEventListener('click', () => {
+                        tetromino.x -= 1;
+                        if (collide(board, tetromino)) {
+                            tetromino.x += 1;
+                        } else {
+                            moveSound.play();
+                        }
+                        drawBoard();
+                        drawTetromino();
+                    });
+                    document.getElementById('rotate').addEventListener('click', () => {
+                        const rotated = rotate(tetromino.shape);
+                        const posX = tetromino.x;
+                        tetromino.shape = rotated;
+                        if (collide(board, tetromino)) {
+                            tetromino.shape = rotate(rotate(rotate(rotated)));
+                            tetromino.x = posX;
+                        } else {
+                            rotateSound.play();
+                        }
+                        drawBoard();
+                        drawTetromino();
+                    });
+                    document.getElementById('right').addEventListener('click', () => {
+                        tetromino.x += 1;
+                        if (collide(board, tetromino)) {
+                            tetromino.x -= 1;
+                        } else {
+                            moveSound.play();
+                        }
+                        drawBoard();
+                        drawTetromino();
+                    });
+                    document.getElementById('down').addEventListener('click', () => {
+                        tetromino.y += 1;
+                        if (collide(board, tetromino)) {
+                            tetromino.y -= 1;
+                        } else {
+                            moveSound.play();
+                        }
+                        drawBoard();
+                        drawTetromino();
+                    });
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key === 'ArrowLeft') {
+                            tetromino.x -= 1;
+                            if (collide(board, tetromino)) {
+                                tetromino.x += 1;
+                            } else {
+                                moveSound.play();
+                            }
+                        } else if (e.key === 'ArrowRight') {
+                            tetromino.x += 1;
+                            if (collide(board, tetromino)) {
+                                tetromino.x -= 1;
+                            } else {
+                                moveSound.play();
+                            }
+                        } else if (e.key === 'ArrowDown') {
+                            tetromino.y += 1;
+                            if (collide(board, tetromino)) {
+                                tetromino.y -= 1;
+                            } else {
+                                moveSound.play();
+                            }
+                        } else if (e.key === 'ArrowUp') {
+                            const rotated = rotate(tetromino.shape);
+                            const posX = tetromino.x;
+                            tetromino.shape = rotated;
+                            if (collide(board, tetromino)) {
+                                tetromino.shape = rotate(rotate(rotate(rotated)));
+                                tetromino.x = posX;
+                            } else {
+                                rotateSound.play();
+                            }
+                        }
+                        drawBoard();
+                        drawTetromino();
+                    });
+                }
+
+                resetTetromino();
+                handleControls();
+                drawBoard();
+                drawTetromino();
+                update();
+            }
+        });
+    </script>
+</body>
+</html>
